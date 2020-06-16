@@ -1,0 +1,59 @@
+---
+title: "Prepare NIST msp"
+author: "Patrick Brophy"
+date: "6/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+```
+
+#Load Code
+```{r}
+#PreProcess_MSP.R contains all the functions used to import and pre-process NIST spectral library
+#Note: it requires mspReader package: https://github.com/pmbrophy/mspReader
+source("PreProcess_MSP.R")
+```
+
+#Import Data
+```{r}
+#Path to nist.msp
+msp_file_path <- "C:\\Users\\unknown\\Desktop\\Data\\NIST\\Human_ionTrap\\human_consensus_final_true_lib.msp"
+
+data <- import_NIST_MSP(mspPath = msp_file_path)
+```
+
+#Process and convert data
+```{r}
+#Peptide sequence cleanup
+data <- cleanupSequence(mspData = data)
+data <- calcSequenceLength(mspData = data)
+
+#Remove peptides with modifications
+data <- removeMods(mspData = data)
+
+#Process fragment ion annotations
+data <- processAnnotations(mspData = data)
+
+#Limit data to only y and b ions with no neutral loss
+data <- select_y_b_ions(mspData = data)
+
+#Parse the y/b ion annotations to extract charge state, ion type, and fragmentation location 
+data <- parse_y_b_annotations(mspData = data)
+
+#Get fragment ion sequences and sequence length
+data <- calculate_fragIonSequences(mspData = data)
+
+#Calculate exact mass and m/z of each fragment ion
+data <- calculateSequence_ExactMass(mspData = data)
+data <- calculateSequence_mzs(mspData = data)
+```
+
+#Save the data.table
+```{r}
+fst_name <- paste0(tools::file_path_sans_ext(basename(msp_file_path)), ".fst")
+fst::write.fst(x = data, path = fst_name)
+```
