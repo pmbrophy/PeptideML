@@ -56,7 +56,7 @@ compareFragResults <- function(model, test_x, test_y){
   answer <- rbindlist(list(model_result, answer))
   
   
-  answer[, peptideIndex := match(x = sequence, table = unique(sequence))]
+  #answer[, peptideIndex := match(x = sequence, table = unique(sequence))]
   answer
 }
 
@@ -74,4 +74,20 @@ compareFragResults_plot <- function(compareResultsDt){
     facet_wrap("sequence", scales = "free")+
     geom_hline(yintercept = 0)+
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+}
+
+
+
+
+correlateFragResults <- function(model, test_x, test_y){
+  model_result <- predict(object = model, test_x)
+  dimnames(model_result) <- dimnames(test_y)
+  
+  #Convert arrays to actual ions
+  model_result <- decodeFragArray(model_result)
+  answer <- decodeFragArray(test_y)
+  
+  answer <- merge(x = answer, y = model_result, by = c("sequence", "fragmentLength", "type_charge", "fragment_type", "fragment_charge", "precursorCharge"))
+  
+  answer
 }
