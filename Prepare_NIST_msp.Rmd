@@ -20,6 +20,7 @@ source("PreProcess_MSP.R")
 
 #Import Data
 ```{r}
+#Obtain Spectral libraries from this link: https://chemdata.nist.gov/dokuwiki/doku.php?id=peptidew:cdownload
 #Path to nist.msp
 msp_file_path <- "C:\\Users\\unknown\\Desktop\\Data\\NIST\\Human_ionTrap\\human_consensus_final_true_lib.msp"
 
