@@ -1,0 +1,152 @@
+---
+title: "Tensorize"
+author: "Patrick Brophy"
+date: "6/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(fst)
+library(ggplot2)
+source("PeptideSequence2Tensor.R")
+source("PeptideFragments2Tensor.R")
+```
+
+#Import Data
+This markdown picks up where "Prepare_NIST_msp.Rmd" concludes. The first step is to import the serialized .fst data generated at the end of "Prepare_NIST_msp.Rmd". Then, we convert it to a data.table.
+
+```{r}
+data <- read_fst(path = "human_consensus_final_true_lib.fst")
+data <- as.data.table(data)
+```
+
+#Precursor Distributions: Charges and Sequence Lengths 
+```{r eval=FALSE, include=FALSE}
+scientific <- function(x){
+    ifelse(x==0, "0", parse(text=gsub("[+]", "", gsub("e", " %*% 10^", scales::scientific_format()(x)))))
+}
+
+ggplot(data = data, aes(x = seqLen))+
+  geom_histogram(binwidth = 1)+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text = element_text(color = "black"))+
+  scale_y_continuous(expand = c(0,0), label = scientific)+
+  labs(title = "Distribution of Peptides by Sequence Length", x = "Sequence Length")
+
+ggplot(data = data, aes(x = Charge))+
+  geom_histogram(binwidth = 1)+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text = element_text(color = "black"))+
+  scale_y_continuous(expand = c(0,0), label = scientific)+
+  labs(title = "Distribution of Peptides by Sequence Length", x = "Precursor Charge State")
+
+ggplot(data = data, aes(x = seqLen))+
+  geom_histogram(binwidth = 1)+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text = element_text(color = "black"))+
+  scale_y_continuous(expand = c(0,0), label = scientific)+
+  labs(title = "Distribution of Peptides by Sequence Length", 
+       subtitle = "Subset by Charge State", 
+       x = "Sequence Length")+
+  facet_wrap("Charge", scales = "free")
+```
+
+#Subset Data
+The approach for the initial test is to train a model to predict fragment ion intensity from integer encoded peptide sequences of a single charge state. The fragment ions are then either "y" or "b" ions with a charge less than or equal to that of the input peptide sequences.
+
+##Precursor ion subsetting
+```{r}
+#Limit Precursor to charge == 2 & length <= 30
+maxSequenceLength <- 30
+chargeState <- 2
+
+data <- data[seqLen <= maxSequenceLength, ]
+data <- data[Charge == chargeState, ]
+
+#Index by name and charge to provide unique identifier for precursor species 
+#that could have multiple charge states but the same name (sequence). Not the case here... 
+data[, name_charge_index := as.numeric(as.factor(paste0(Name, Charge)))]
+
+numUniquePrecursors <- length(unique(data$name_charge_index))
+```
+
+##Fragment Ion 
+```{r}
+#Index fragment ions by unique y/b charge state combinations 
+data[, fragType_chargeCode := paste0(ionType, fragChargeState)]
+fragType_chargeCode_lookup <- sort(unique(data$fragType_chargeCode))
+data[, fragType_chargeCode := match(x = fragType_chargeCode, table = fragType_chargeCode_lookup)]
+
+#Number of fragments per unique precursor
+data[, nFragments := max(.N), by = name_charge_index]
+
+#Normalize ion intensity
+data[, intensity_norm := intensity/max(intensity)]
+```
+
+#Tensorize 
+The model will take as an input an array with dimensions (`r numUniquePrecursors`, `r maxSequenceLength`, 1). Each row is a unique precursor ion and each column is a location within the sequence. The array is filled with integers corresponding to the amino acid single letter codes.
+
+The model will be trained on output data consisting of arrays with dimensions (`r numUniquePrecursors`, `r maxLength`, `r length(fragType_chargeCode_lookup)`). For a single peptide with a given charge state, this corresponds to a matrix  where the number of rows equals to the length of the longest peptide in the set; the number of columns equals the number of various ion types allowed by prior filtering: `r fragType_chargeCode_lookup`.
+
+##Input Data Conversion - sequences at a given charge state
+```{r}
+#Convert all aa sequences into matrix grids
+aa <- c("G", "A", "L", "M", "F", "W", "K", "Q", "E", "S", "P", "V", "I", "C", "Y", "H", "R", "N", "D", "T")
+aa <- sort(aa)
+
+#Subset the data.table by selecting unique sequence/charge combinations
+data_unique <- unique(data[,list(name_charge_index, Name, Charge)])
+
+input_integerSequences <- sequence2tensor_intSequence(uniqueDt = data_unique, aa = aa)
+
+image(t(input_integerSequences[1:10,,1]), 
+      y = c(1:10), 
+      x = c(1:maxLength), 
+      col = rainbow(n = 21), 
+      xlab = "Sequence Index", 
+      ylab = "Peptide Index")
+```
+
+##Output Data Conversion - product ions from a sequence at a given charge state
+```{r}
+output_fragmentEncodings <- fragments2tensor(fragmentDt = data, uniqueDt = data_unique)
+image((output_fragmentEncodings[1,,]), 
+      y = c(1:4), 
+      x = c(1:maxLength), 
+      col = hcl.colors(n = 100), 
+      xlab = "Sequence Index", 
+      ylab = "Fragment Type")
+
+decode<- decodeFragArray(fragmentArray = output_fragmentEncodings[1:10,,])
+
+#Ensure decodings match
+decode_pep <- decode[sequence == "AATALLEAGLAR" & intensity > 0, .(fragment_type, intensity, fragment_charge)]
+decode_pep <- decode_pep[order(decode_pep$fragment_type)]
+
+data_pep <- data[Name == "AATALLEAGLAR" & intensity_norm > 0, .(goodAnnotation , intensity_norm, fragChargeState)]
+data_pep <- data_pep[order(data_pep$goodAnnotation)]
+```
+
+```{r}
+save(list = c("input_integerSequences", "output_fragmentEncodings"), file = "Tensors.Rdat")
+
+```
+
+
+
+
+
+
+
+
+
+
