@@ -1,0 +1,55 @@
+---
+title: "Deep Learning on Peptide Data"
+author: "Patrick Brophy"
+date: "6/17/2020"
+output: html_document
+---
+This markdown implements the deep learning models trained on tensors generated in the Tensorize.Rmd markdown file. 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(keras)
+library(zeallot)
+source("TrainValTest.R")
+```
+
+#Load binary data 
+```{r}
+load(file = "Tensors.Rdat")
+```
+
+#Split data into segments
+```{r}
+dat <- split_trainValTest(sequenceArray = input_integerSequences, 
+                          fragArray = output_fragmentEncodings, 
+                          frac_test = 0.1, 
+                          frac_train = 0.7)
+
+c(c(train_x, train_y), c(validate_x, validate_y), c(test_x, test_y)) %<-% dat
+remove(dat)
+```
+
+#Simple deep learning model
+```{r}
+#Check dimensions
+ion_charge_types <- dim(train_y)[3]
+maxSequenceLength <- dim(train_x)[2]
+
+#Model 
+layers <- list(layer_embedding(input_dim = 21, input_length = maxSequenceLength, output_dim = 32),
+               bidirectional(layer = layer_gru(units = 32, return_sequences = TRUE)),
+               layer_gru(units = 64, return_sequences = TRUE),
+               layer_dense(units = ion_charge_types, activation = "sigmoid"))
+
+model <- keras_model_sequential(layers = layers)
+
+
+compile(object = model, optimizer = "rmsprop", loss = "binary_crossentropy")
+
+#Fit
+fitResults <- fit(object = model, 
+                  x = train_x, 
+                  y = train_y, 
+                  epochs = 5, 
+                  validation_data = list(val_x, val_y))
+```
