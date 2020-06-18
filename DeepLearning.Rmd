@@ -45,9 +45,9 @@ layers <- list(layer_embedding(input_dim = 21, input_length = maxSequenceLength,
 model <- keras_model_sequential(layers = layers)
 
 
-compile(object = model, optimizer = "rmsprop", loss = "binary_crossentropy")
+compile(object = model, optimizer = "rmsprop", loss = "binary_crossentropy") #adam shows no difference
 
-#Fit
+#Fit (Achieved 0.07 after 5 epoch)
 fitResults <- fit(object = model, 
                   x = train_x, 
                   y = train_y, 
@@ -61,6 +61,186 @@ save_model_hdf5(object = model, filepath = "model_1.hdf")
 
 #Evaluate results of first simple model
 ```{r}
-results <- correlateFragResults(model = model, test_x = test_x, test_y = test_y)
+#Wide data.table of intensity from model/reference
+results <- mergeFragResults_wide(model = model, test_x = test_x, test_y = test_y)
+
+#Calculate cosine similarity, contrast angle theta, and r2
+corResults <- correlateFragResults(results)
+
+#
+results_long <- mergeFragResults_long(model = model, test_x = test_x, test_y)
+
+compareFragResults_plot(compareResultsDt = results_long[peptideIndex %in% sample(x = c(1:max(peptideIndex)), size = 10)])
+```
+
+#Run second model with higher dimensionality - NO IMPROVEMENT
+```{r}
+ion_charge_types <- dim(train_y)[3]
+maxSequenceLength <- dim(train_x)[2]
+
+#Model 
+layers2 <- list(layer_embedding(input_dim = 21, input_length = maxSequenceLength, output_dim = 32),
+               bidirectional(layer = layer_gru(units = 64, return_sequences = TRUE)),
+               layer_gru(units = 128, return_sequences = TRUE),
+               layer_dense(units = ion_charge_types, activation = "sigmoid"))
+
+model2 <- keras_model_sequential(layers = layers2)
+
+
+compile(object = model2, optimizer = "rmsprop", loss = "binary_crossentropy")
+
+#Fit (Achieved 0.07 after 5 epoch) - no improvement
+fitResults <- fit(object = model2, 
+                  x = train_x, 
+                  y = train_y, 
+                  epochs = 5, 
+                  validation_data = list(validate_x, validate_y))
+
+save_model_hdf5(object = model2, filepath = "model_2.hdf")
 
 ```
+
+```{r}
+#Wide data.table of intensity from model/reference
+results2 <- mergeFragResults_wide(model = model2, test_x = test_x, test_y = test_y)
+
+#Calculate cosine similarity, contrast angle theta, and r2
+corResults2 <- correlateFragResults(results2)
+
+#
+results_long2 <- mergeFragResults_long(model = model2, test_x = test_x, test_y)
+
+compareFragResults_plot(compareResultsDt = results_long[peptideIndex %in% sample(x = c(1:max(peptideIndex)), size = 10)])
+
+results_long2[, sequenceLength := nchar(sequence)]
+ggplot(data = corResults2, aes(x = sequence_length, y = contrast_theta, group = sequence_length)) + 
+  geom_violin()
+```
+
+
+#Run 3rd model with extra dense layer - NO IMPROVEMENT
+```{r}
+#Check dimensions
+ion_charge_types <- dim(train_y)[3]
+maxSequenceLength <- dim(train_x)[2]
+
+#Model 
+layers3 <- list(layer_embedding(input_dim = 21, input_length = maxSequenceLength, output_dim = 32),
+               bidirectional(layer = layer_gru(units = 32, return_sequences = TRUE)),
+               layer_gru(units = 64, return_sequences = TRUE),
+               layer_dense(units = 32),
+               layer_dense(units = ion_charge_types, activation = "sigmoid"))
+
+model3 <- keras_model_sequential(layers = layers3)
+
+
+compile(object = model3, optimizer = "rmsprop", loss = "binary_crossentropy")
+
+#Fit (Achieved 0.07 after 5 epoch)
+fitResults <- fit(object = model3, 
+                  x = train_x, 
+                  y = train_y, 
+                  epochs = 5, 
+                  validation_data = list(validate_x, validate_y))
+
+save_model_hdf5(object = model3, filepath = "model_3.hdf")
+
+#serialize_model(model = model)
+```
+
+
+#Neural Net model with one-hot encoding - VERY POOR PERFORMANCE
+```{r}
+#Rebuild train/test/val sets with one-hot encodings
+dat <- split_trainValTest(sequenceArray = input_oneHots, 
+                          fragArray = output_fragmentEncodings, 
+                          frac_test = 0.1, 
+                          frac_train = 0.7)
+
+c(c(train_onehot_x, train_onehot_y), c(validate_onehot_x, validate_onehot_y), c(test_onehot_x, test_onehot_y)) %<-% dat
+remove(dat)
+
+#Check dimensions
+ion_charge_types <- dim(train_onehot_y)[3]
+input_x_dims <- dim(train_onehot_x)
+maxSequenceLength <- input_x_dims[2]
+
+layers4 <- list(layer_dense(units = 256, activation = "sigmoid", input_shape = input_x_dims[2:3]),
+                layer_dense(units = 128, activation = "sigmoid"),
+                layer_dense(units = 64, activation = "sigmoid"),
+                layer_dense(units = 16, activation = "sigmoid"),
+                layer_dense(units = 4, activation = "sigmoid"))
+
+model4 <- keras_model_sequential(layers = layers4)
+
+
+compile(object = model4, optimizer = "rmsprop", loss = "binary_crossentropy")
+
+#Fit (Achieved 0.07 after 5 epoch)
+fitResults <- fit(object = model4, 
+                  x = train_onehot_x, 
+                  y = train_onehot_y, 
+                  epochs = 5, 
+                  validation_data = list(validate_onehot_x, validate_onehot_y))
+
+save_model_hdf5(object = model3, filepath = "model_4.hdf")
+
+#serialize_model(model = model)
+```
+
+```{r}
+#Wide data.table of intensity from model/reference
+results4 <- mergeFragResults_wide(model = model4, test_x = test_onehot_x, test_y = test_onehot_y)
+
+#Calculate cosine similarity, contrast angle theta, and r2
+corResults4 <- correlateFragResults(wideDt = results4)
+
+ggplot(data = corResults4, aes(x = cor, group = sequence_length)) + 
+  geom_histogram(binwidth = 0.01) + 
+  facet_wrap("sequence_length", scales = "free")
+
+#
+results_long4 <- mergeFragResults_long(model = model4, test_x = test_onehot_x, test_onehot_y)
+
+compareFragResults_plot(compareResultsDt = results_long4[peptideIndex %in% sample(x = c(1:max(peptideIndex)), size = 10)])
+
+results_long2[, sequenceLength := nchar(sequence)]
+ggplot(data = corResults2, aes(x = sequence_length, y = contrast_theta, group = sequence_length)) + 
+  geom_violin()
+```
+
+#Convolutional Net model 
+```{r}
+layers5 <- list(layer_embedding(input_dim = 21, input_length = maxSequenceLength, output_dim = 32),
+               layer_conv_1d(filters = 64, kernel_size = 5, activation = "relu"),
+               layer_max_pooling_1d(pool_size = 3), 
+               layer_conv_1d(filters = 64, kernel_size = 3, activation = "relu"),
+               #layer_global_max_pooling_1d(),
+               layer_dense(units = ion_charge_types, activation = "sigmoid"))
+
+model4 <- keras_model_sequential(layers = layers5)
+
+
+compile(object = model4, optimizer = "rmsprop", loss = "binary_crossentropy")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
