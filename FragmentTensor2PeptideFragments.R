@@ -31,17 +31,23 @@ decodeFragArray <- function(fragmentArray){
   dtList
 }
 
-#' Compare results from model to known answer
+#' Compare results from model to known answer (long output)
+#'
+#' @description a model is used to predict the output from an input tensor
+#'   (test_x). It is converted using decodeFragArray(). The ground truth
+#'   (test_y) is also converted using decodeFragArray() and all the data are
+#'   formatted into a long data.table. There is only one intensity column and a
+#'   label column "isModel". Useful for plotting. 
 #'
 #' @param model a trained model with method in predict()
 #' @param test_x input sequence array to generate predicted fragment pattern
-#' @param test_y known answer encoded as an array 
+#' @param test_y known answer encoded as an array
 #'
-#' @return a data.table
+#' @return a long formatted data.table
 #' @export
-#'
+#' 
 
-compareFragResults <- function(model, test_x, test_y){
+mergeFragResults_long <- function(model, test_x, test_y){
   model_result <- predict(object = model, test_x)
   dimnames(model_result) <- dimnames(test_y)
   
@@ -56,15 +62,15 @@ compareFragResults <- function(model, test_x, test_y){
   answer <- rbindlist(list(model_result, answer))
   
   
-  #answer[, peptideIndex := match(x = sequence, table = unique(sequence))]
+  answer[, peptideIndex := match(x = sequence, table = unique(sequence))]
   answer
 }
 
 #' Visualize comparison of model to known
 #'
-#' @param compareResultsDt data.table returned by compareFragResults
+#' @param compareResultsDt data.table returned by mergeFragResults_long()
 #'
-#' @return
+#' @return a ggplot
 #' @export
 #'
 
@@ -77,9 +83,24 @@ compareFragResults_plot <- function(compareResultsDt){
 }
 
 
+#' Compare results from model to known answer (wide output)
+#'
+#' @description a model is used to predict the output from an input tensor
+#'   (test_x). It is converted using decodeFragArray(). The ground truth
+#'   (test_y) is also converted using decodeFragArray() and all the data are
+#'   formatted into a wide data.table. There are two intensity columns
+#'   ("intensity_reference", "intensity_model") and their values are merged
+#'   rowise by multiple keys for direct comparison.
+#'
+#' @param model a trained model with method in predict()
+#' @param test_x input sequence array to generate predicted fragment pattern
+#' @param test_y known answer encoded as an array
+#'
+#' @return a wide formatted data.table with two intensity columns
+#'   ("intensity_reference", "intensity_model")
+#'   
 
-
-correlateFragResults <- function(model, test_x, test_y){
+mergeFragResults_wide <- function(model, test_x, test_y){
   model_result <- predict(object = model, test_x)
   dimnames(model_result) <- dimnames(test_y)
   
@@ -89,5 +110,44 @@ correlateFragResults <- function(model, test_x, test_y){
   
   answer <- merge(x = answer, y = model_result, by = c("sequence", "fragmentLength", "type_charge", "fragment_type", "fragment_charge", "precursorCharge"))
   
+  setnames(x = answer, old = c("intensity.x", "intensity.y"), new = c("intensity_reference", "intensity_model"))
+  
   answer
 }
+
+
+#' Correlate fragment model results to known
+#'
+#' @param wideDt data.table returned by mergeFragResults_wide()
+#'
+#' @return a summary data.table containing r^2 value, cos(theta) "cosine similarity", and theta "spectral contrast angle".
+#' @export
+#'
+
+correlateFragResults <- function(wideDt){
+  #r2 from linear regression 
+  cor <- wideDt[, .(cor = summary(lm(intensity_reference ~ intensity_model))$r.squared), 
+                 by = .(sequence, precursorCharge)]
+  
+  
+  #Cosine similarity/Spectral contrast angle
+  contrast <- wideDt[, cosineSim := cosineSimilarity(intensity_reference, intensity_model), by = .(sequence, precursorCharge)]
+  contrast <- unique(contrast[,.(sequence, precursorCharge, cosineSim)])
+  
+  #TODO: Make sure spectral contrast angle is correct... differs from prosit. 
+  contrast[, contrast_theta := acos(cosineSim)]
+  
+  contrast[, sequence_length := nchar(sequence)]
+  
+  out <- merge(x = cor, y = contrast, by = c("sequence", "precursorCharge"))
+  out
+}
+
+
+cosineSimilarity <- function(x,y){
+  nume <- (x %*% y)
+  denom <- sqrt(sum(x^2) * sum(y^2))
+  
+  nume/denom
+}
+
