@@ -11,6 +11,7 @@ library(data.table)
 library(keras)
 library(zeallot)
 source("TrainValTest.R")
+source("FragmentTensor2PeptideFragments.R")
 ```
 
 #Load binary data 
@@ -51,5 +52,15 @@ fitResults <- fit(object = model,
                   x = train_x, 
                   y = train_y, 
                   epochs = 5, 
-                  validation_data = list(val_x, val_y))
+                  validation_data = list(validate_x, validate_y))
+
+save_model_hdf5(object = model, filepath = "model_1.hdf")
+
+#serialize_model(model = model)
+```
+
+#Evaluate results of first simple model
+```{r}
+results <- correlateFragResults(model = model, test_x = test_x, test_y = test_y)
+
 ```
