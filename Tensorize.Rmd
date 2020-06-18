@@ -95,7 +95,7 @@ data[, intensity_norm := intensity/max(intensity)]
 #Tensorize 
 The model will take as an input an array with dimensions (`r numUniquePrecursors`, `r maxSequenceLength`, 1). Each row is a unique precursor ion and each column is a location within the sequence. The array is filled with integers corresponding to the amino acid single letter codes.
 
-The model will be trained on output data consisting of arrays with dimensions (`r numUniquePrecursors`, `r maxLength`, `r length(fragType_chargeCode_lookup)`). For a single peptide with a given charge state, this corresponds to a matrix  where the number of rows equals to the length of the longest peptide in the set; the number of columns equals the number of various ion types allowed by prior filtering: `r fragType_chargeCode_lookup`.
+The model will be trained on output data consisting of arrays with dimensions (`r numUniquePrecursors`, `r maxSequenceLength`, `r length(fragType_chargeCode_lookup)`). For a single peptide with a given charge state, this corresponds to a matrix  where the number of rows equals to the length of the longest peptide in the set; the number of columns equals the number of various ion types allowed by prior filtering: `r fragType_chargeCode_lookup`.
 
 ##Input Data Conversion - sequences at a given charge state
 ```{r}
@@ -107,10 +107,11 @@ aa <- sort(aa)
 data_unique <- unique(data[,list(name_charge_index, Name, Charge)])
 
 input_integerSequences <- sequence2tensor_intSequence(uniqueDt = data_unique, aa = aa)
+input_oneHots <- sequence2tensor_oneHot(uniqueDt = data_unique, aa = aa)
 
 image(t(input_integerSequences[1:10,,1]), 
       y = c(1:10), 
-      x = c(1:maxLength), 
+      x = c(1:maxSequenceLength), 
       col = rainbow(n = 21), 
       xlab = "Sequence Index", 
       ylab = "Peptide Index")
@@ -121,7 +122,7 @@ image(t(input_integerSequences[1:10,,1]),
 output_fragmentEncodings <- fragments2tensor(fragmentDt = data, uniqueDt = data_unique)
 image((output_fragmentEncodings[1,,]), 
       y = c(1:4), 
-      x = c(1:maxLength), 
+      x = c(1:maxSequenceLength), 
       col = hcl.colors(n = 100), 
       xlab = "Sequence Index", 
       ylab = "Fragment Type")
@@ -137,7 +138,7 @@ data_pep <- data_pep[order(data_pep$goodAnnotation)]
 ```
 
 ```{r}
-save(list = c("input_integerSequences", "output_fragmentEncodings"), file = "Tensors.Rdat")
+save(list = c("input_integerSequences", "output_fragmentEncodings", "input_oneHots"), file = "Tensors.Rdat")
 
 ```
 
